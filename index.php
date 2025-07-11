@@ -8,6 +8,10 @@ define('DB_USER', 'root');
 define('DB_PASS', '');
 define('DB_NAME', 'ecommerce_recommendations');
 
+// Stripe Configuration (use your test keys)
+define('STRIPE_KEY', 'sk_test_51P...'); // Your test secret key
+define('STRIPE_PUBLIC', 'pk_test_51P...'); // Your test publishable key
+
 // Connect to Database
 function db_connect() {
     $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
@@ -60,6 +64,48 @@ function initialize_database() {
         PRIMARY KEY (user_id, product_id),
         FOREIGN KEY (user_id) REFERENCES users(id),
         FOREIGN KEY (product_id) REFERENCES products(id)
+    )");
+    
+    // Cart table
+    $conn->query("CREATE TABLE IF NOT EXISTS cart (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        product_id INT NOT NULL,
+        quantity INT NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
+    )");
+    
+    // Orders table
+    $conn->query("CREATE TABLE IF NOT EXISTS orders (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        stripe_payment_intent_id VARCHAR(255) NOT NULL,
+        amount DECIMAL(10,2) NOT NULL,
+        status ENUM('pending', 'completed', 'failed') DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )");
+    
+    // Order items table
+    $conn->query("CREATE TABLE IF NOT EXISTS order_items (
+        order_id INT NOT NULL,
+        product_id INT NOT NULL,
+        quantity INT NOT NULL,
+        price DECIMAL(10,2) NOT NULL,
+        FOREIGN KEY (order_id) REFERENCES orders(id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
+    )");
+    
+    // Messages table
+    $conn->query("CREATE TABLE IF NOT EXISTS messages (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        subject VARCHAR(255) NOT NULL,
+        message TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )");
     
     // Sample data if tables are empty
@@ -407,6 +453,107 @@ function get_categories() {
     return $categories;
 }
 
+// Cart Functions
+function add_to_cart($userId, $productId, $quantity = 1) {
+    $conn = db_connect();
+    
+    // Check if product already in cart
+    $stmt = $conn->prepare("SELECT id, quantity FROM cart WHERE user_id = ? AND product_id = ?");
+    $stmt->bind_param("ii", $userId, $productId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        // Update quantity
+        $row = $result->fetch_assoc();
+        $newQuantity = $row['quantity'] + $quantity;
+        $stmt = $conn->prepare("UPDATE cart SET quantity = ? WHERE id = ?");
+        $stmt->bind_param("ii", $newQuantity, $row['id']);
+        return $stmt->execute();
+    } else {
+        // Add new item
+        $stmt = $conn->prepare("INSERT INTO cart (user_id, product_id, quantity) VALUES (?, ?, ?)");
+        $stmt->bind_param("iii", $userId, $productId, $quantity);
+        return $stmt->execute();
+    }
+}
+
+function remove_from_cart($userId, $cartItemId) {
+    $conn = db_connect();
+    $stmt = $conn->prepare("DELETE FROM cart WHERE id = ? AND user_id = ?");
+    $stmt->bind_param("ii", $cartItemId, $userId);
+    return $stmt->execute();
+}
+
+function update_cart_item($userId, $cartItemId, $quantity) {
+    $conn = db_connect();
+    $stmt = $conn->prepare("UPDATE cart SET quantity = ? WHERE id = ? AND user_id = ?");
+    $stmt->bind_param("iii", $quantity, $cartItemId, $userId);
+    return $stmt->execute();
+}
+
+function get_cart_items($userId) {
+    $conn = db_connect();
+    $stmt = $conn->prepare("
+        SELECT c.id AS cart_id, p.id, p.name, p.price, c.quantity, p.image_url 
+        FROM cart c
+        JOIN products p ON c.product_id = p.id
+        WHERE c.user_id = ?
+    ");
+    $stmt->bind_param("i", $userId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    $items = [];
+    while ($row = $result->fetch_assoc()) {
+        $items[] = $row;
+    }
+    return $items;
+}
+
+function get_cart_total($userId) {
+    $items = get_cart_items($userId);
+    $total = 0;
+    foreach ($items as $item) {
+        $total += $item['price'] * $item['quantity'];
+    }
+    return $total;
+}
+
+function clear_cart($userId) {
+    $conn = db_connect();
+    $stmt = $conn->prepare("DELETE FROM cart WHERE user_id = ?");
+    $stmt->bind_param("i", $userId);
+    return $stmt->execute();
+}
+
+// Order Functions
+function create_order($userId, $paymentIntentId, $amount) {
+    $conn = db_connect();
+    $stmt = $conn->prepare("INSERT INTO orders (user_id, stripe_payment_intent_id, amount) VALUES (?, ?, ?)");
+    $stmt->bind_param("isd", $userId, $paymentIntentId, $amount);
+    $stmt->execute();
+    return $conn->insert_id;
+}
+
+function add_order_items($orderId, $items) {
+    $conn = db_connect();
+    $stmt = $conn->prepare("INSERT INTO order_items (order_id, product_id, quantity, price) VALUES (?, ?, ?, ?)");
+    
+    foreach ($items as $item) {
+        $stmt->bind_param("iiid", $orderId, $item['id'], $item['quantity'], $item['price']);
+        $stmt->execute();
+    }
+}
+
+// Contact Functions
+function send_message($name, $email, $subject, $message) {
+    $conn = db_connect();
+    $stmt = $conn->prepare("INSERT INTO messages (name, email, subject, message) VALUES (?, ?, ?, ?)");
+    $stmt->bind_param("ssss", $name, $email, $subject, $message);
+    return $stmt->execute();
+}
+
 // Start session AFTER output buffering
 session_start();
 
@@ -447,6 +594,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (is_logged_in() && isset($_POST['product_id'], $_POST['rating'])) {
                     rate_product($_SESSION['user_id'], $_POST['product_id'], $_POST['rating']);
                     header("Location: ?page=product&id=" . $_POST['product_id']);
+                    exit;
+                }
+                break;
+                
+            case 'add_to_cart':
+                if (is_logged_in() && isset($_POST['product_id'])) {
+                    $quantity = isset($_POST['quantity']) ? (int)$_POST['quantity'] : 1;
+                    add_to_cart($_SESSION['user_id'], $_POST['product_id'], $quantity);
+                    header("Location: ?page=cart");
+                    exit;
+                }
+                break;
+                
+            case 'update_cart':
+                if (is_logged_in() && isset($_POST['cart_id'], $_POST['quantity'])) {
+                    update_cart_item($_SESSION['user_id'], $_POST['cart_id'], $_POST['quantity']);
+                    header("Location: ?page=cart");
+                    exit;
+                }
+                break;
+                
+            case 'remove_from_cart':
+                if (is_logged_in() && isset($_POST['cart_id'])) {
+                    remove_from_cart($_SESSION['user_id'], $_POST['cart_id']);
+                    header("Location: ?page=cart");
+                    exit;
+                }
+                break;
+                
+            case 'checkout':
+                if (is_logged_in()) {
+                    header("Location: ?page=checkout");
+                    exit;
+                }
+                break;
+                
+            case 'send_message':
+                if (isset($_POST['name'], $_POST['email'], $_POST['subject'], $_POST['message'])) {
+                    send_message(
+                        htmlspecialchars($_POST['name']),
+                        htmlspecialchars($_POST['email']),
+                        htmlspecialchars($_POST['subject']),
+                        htmlspecialchars($_POST['message'])
+                    );
+                    $_SESSION['message_sent'] = true;
+                    header("Location: ?page=contact");
                     exit;
                 }
                 break;
@@ -597,9 +790,13 @@ function home_page() {
                                 <a href="?page=product&id=<?= $product['id'] ?>" class="btn btn-outline btn-sm">
                                     <i class="fas fa-info-circle"></i> Details
                                 </a>
-                                <button class="btn btn-primary btn-sm">
-                                    <i class="fas fa-shopping-cart"></i> Add to Cart
-                                </button>
+                                <form method="post" class="add-to-cart-form">
+                                    <input type="hidden" name="action" value="add_to_cart">
+                                    <input type="hidden" name="product_id" value="<?= $product['id'] ?>">
+                                    <button type="submit" class="btn btn-primary btn-sm">
+                                        <i class="fas fa-shopping-cart"></i> Add to Cart
+                                    </button>
+                                </form>
                             </div>
                         </div>
                     </div>
@@ -659,9 +856,13 @@ function products_page() {
                             <a href="?page=product&id=<?= $product['id'] ?>" class="btn btn-outline btn-sm">
                                 <i class="fas fa-info-circle"></i> Details
                             </a>
-                            <button class="btn btn-primary btn-sm">
-                                <i class="fas fa-shopping-cart"></i> Add to Cart
-                            </button>
+                            <form method="post" class="add-to-cart-form">
+                                <input type="hidden" name="action" value="add_to_cart">
+                                <input type="hidden" name="product_id" value="<?= $product['id'] ?>">
+                                <button type="submit" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-shopping-cart"></i> Add to Cart
+                                </button>
+                            </form>
                         </div>
                     </div>
                 </div>
@@ -728,9 +929,13 @@ function product_page() {
                             <?php endif; ?>
                         </div>
                         
-                        <button class="btn btn-primary" style="padding: 12px 20px; font-size: 1.1rem;">
-                            <i class="fas fa-shopping-cart"></i> Add to Cart
-                        </button>
+                        <form method="post">
+                            <input type="hidden" name="action" value="add_to_cart">
+                            <input type="hidden" name="product_id" value="<?= $product['id'] ?>">
+                            <button type="submit" class="btn btn-primary" style="padding: 12px 20px; font-size: 1.1rem;">
+                                <i class="fas fa-shopping-cart"></i> Add to Cart
+                            </button>
+                        </form>
                     </div>
                 </div>
             </div>
@@ -843,51 +1048,292 @@ function about_page() {
 }
 
 function contact_page() {
+    $messageSent = false;
+    if (isset($_SESSION['message_sent'])) {
+        $messageSent = true;
+        unset($_SESSION['message_sent']);
+    }
+    
     ob_start();
     ?>
     <div class="container" style="padding-top: 40px;">
         <h1 class="section-title">Contact Us</h1>
-        <div class="about-content">
-            <h2>Get in Touch</h2>
-            <p>Have questions about our recommendation system or need assistance with your account? Our team is here to help!</p>
+        
+        <?php if ($messageSent): ?>
+            <div class="alert alert-success">
+                <i class="fas fa-check-circle"></i> Your message has been sent successfully!
+            </div>
+        <?php endif; ?>
+        
+        <div class="contact-container">
+            <div class="contact-info">
+                <h3>Get in Touch</h3>
+                <p><i class="fas fa-envelope"></i> support@shopsmart.com</p>
+                <p><i class="fas fa-phone"></i> (800) 123-4567</p>
+                <p><i class="fas fa-clock"></i> Monday-Friday: 9AM-6PM EST</p>
+                <p><i class="fas fa-map-marker-alt"></i> 123 Main St, City, Country</p>
+            </div>
             
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin: 30px 0;">
-                <div>
-                    <h3>Customer Support</h3>
-                    <p><i class="fas fa-envelope"></i> support@shopsmart.com</p>
-                    <p><i class="fas fa-phone"></i> (800) 123-4567</p>
-                    <p><i class="fas fa-clock"></i> Monday-Friday: 9AM-6PM EST</p>
+            <div class="contact-form">
+                <h3>Send Us a Message</h3>
+                <form method="post">
+                    <input type="hidden" name="action" value="send_message">
+                    <div class="form-group">
+                        <label>Your Name</label>
+                        <input type="text" name="name" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Email Address</label>
+                        <input type="email" name="email" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Subject</label>
+                        <input type="text" name="subject" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Message</label>
+                        <textarea name="message" class="form-control" rows="5" required></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-paper-plane"></i> Send Message
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+function cart_page() {
+    if (!is_logged_in()) {
+        header("Location: ?page=login");
+        exit;
+    }
+    
+    $cartItems = get_cart_items($_SESSION['user_id']);
+    $cartTotal = get_cart_total($_SESSION['user_id']);
+    
+    ob_start();
+    ?>
+    <div class="container" style="padding-top: 40px;">
+        <h1 class="section-title">Your Shopping Cart</h1>
+        
+        <?php if (empty($cartItems)): ?>
+            <div class="empty-cart">
+                <i class="fas fa-shopping-cart fa-5x"></i>
+                <h3>Your cart is empty</h3>
+                <p>Start shopping to add items to your cart</p>
+                <a href="?page=products" class="btn btn-primary">Browse Products</a>
+            </div>
+        <?php else: ?>
+            <div class="cart-items">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Product</th>
+                            <th>Price</th>
+                            <th>Quantity</th>
+                            <th>Total</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($cartItems as $item): ?>
+                            <tr>
+                                <td>
+                                    <div class="cart-product-info">
+                                        <div class="cart-product-image">
+                                            <div style="width:60px;height:60px;background:#e0e7ff;display:flex;align-items:center;justify-content:center;color:#4f46e5;font-weight:bold;font-size:12px;">
+                                                <?= substr($item['name'], 0, 15) ?>...
+                                            </div>
+                                        </div>
+                                        <div class="cart-product-name"><?= htmlspecialchars($item['name']) ?></div>
+                                    </div>
+                                </td>
+                                <td>$<?= number_format($item['price'], 2) ?></td>
+                                <td>
+                                    <form method="post" class="cart-quantity-form">
+                                        <input type="hidden" name="action" value="update_cart">
+                                        <input type="hidden" name="cart_id" value="<?= $item['cart_id'] ?>">
+                                        <input type="number" name="quantity" value="<?= $item['quantity'] ?>" min="1" class="quantity-input">
+                                        <button type="submit" class="btn btn-sm btn-outline">Update</button>
+                                    </form>
+                                </td>
+                                <td>$<?= number_format($item['price'] * $item['quantity'], 2) ?></td>
+                                <td>
+                                    <form method="post">
+                                        <input type="hidden" name="action" value="remove_from_cart">
+                                        <input type="hidden" name="cart_id" value="<?= $item['cart_id'] ?>">
+                                        <button type="submit" class="btn btn-danger btn-sm">
+                                            <i class="fas fa-trash"></i> Remove
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+                
+                <div class="cart-summary">
+                    <div class="cart-total">
+                        <h3>Cart Total: $<?= number_format($cartTotal, 2) ?></h3>
+                    </div>
+                    <div class="cart-actions">
+                        <a href="?page=products" class="btn btn-outline">Continue Shopping</a>
+                        <form method="post">
+                            <input type="hidden" name="action" value="checkout">
+                            <button type="submit" class="btn btn-primary">Proceed to Checkout</button>
+                        </form>
+                    </div>
                 </div>
-                <div>
-                    <h3>Technical Inquiries</h3>
-                    <p><i class="fas fa-envelope"></i> tech@shopsmart.com</p>
-                    <p><i class="fas fa-bug"></i> Report a technical issue</p>
-                    <p><i class="fas fa-lightbulb"></i> Feature requests</p>
+            </div>
+        <?php endif; ?>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+function checkout_page() {
+    if (!is_logged_in()) {
+        header("Location: ?page=login");
+        exit;
+    }
+    
+    $cartItems = get_cart_items($_SESSION['user_id']);
+    $cartTotal = get_cart_total($_SESSION['user_id']);
+    
+    if (empty($cartItems)) {
+        header("Location: ?page=cart");
+        exit;
+    }
+    
+    // Initialize Stripe
+    require_once('vendor/autoload.php');
+    \Stripe\Stripe::setApiKey(STRIPE_KEY);
+    
+    // Create Payment Intent
+    $paymentIntent = \Stripe\PaymentIntent::create([
+        'amount' => $cartTotal * 100,
+        'currency' => 'usd',
+        'metadata' => [
+            'user_id' => $_SESSION['user_id']
+        ]
+    ]);
+    
+    ob_start();
+    ?>
+    <div class="container" style="padding-top: 40px;">
+        <h1 class="section-title">Secure Checkout</h1>
+        
+        <div class="checkout-container">
+            <div class="checkout-summary">
+                <h3>Order Summary</h3>
+                <ul>
+                    <?php foreach ($cartItems as $item): ?>
+                        <li>
+                            <?= htmlspecialchars($item['name']) ?> 
+                            <span>$<?= number_format($item['price'] * $item['quantity'], 2) ?></span>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+                <div class="checkout-total">
+                    <h3>Total: <span>$<?= number_format($cartTotal, 2) ?></span></h3>
                 </div>
             </div>
             
-            <h3>Send Us a Message</h3>
-            <form style="margin-top: 20px;">
-                <div class="form-group">
-                    <label>Your Name</label>
-                    <input type="text" class="form-control">
-                </div>
-                <div class="form-group">
-                    <label>Email Address</label>
-                    <input type="email" class="form-control">
-                </div>
-                <div class="form-group">
-                    <label>Subject</label>
-                    <input type="text" class="form-control">
-                </div>
-                <div class="form-group">
-                    <label>Message</label>
-                    <textarea class="form-control" rows="5"></textarea>
-                </div>
-                <button type="submit" class="btn btn-primary">
-                    <i class="fas fa-paper-plane"></i> Send Message
-                </button>
-            </form>
+            <div class="checkout-form">
+                <h3>Payment Information</h3>
+                <p>Your payment details are processed securely by Stripe</p>
+                
+                <form id="payment-form">
+                    <div id="card-element" class="stripe-card-element"></div>
+                    <div id="card-errors" role="alert" class="stripe-errors"></div>
+                    <button type="submit" class="btn btn-primary" id="submit-button">
+                        <i class="fas fa-lock"></i> Pay $<?= number_format($cartTotal, 2) ?>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://js.stripe.com/v3/"></script>
+    <script>
+        const stripe = Stripe('<?= STRIPE_PUBLIC ?>');
+        const elements = stripe.elements();
+        const cardElement = elements.create('card');
+        cardElement.mount('#card-element');
+        
+        const form = document.getElementById('payment-form');
+        const submitButton = document.getElementById('submit-button');
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            submitButton.disabled = true;
+            
+            const { paymentIntent, error } = await stripe.confirmCardPayment(
+                '<?= $paymentIntent->client_secret ?>', {
+                    payment_method: {
+                        card: cardElement
+                    }
+                }
+            );
+            
+            if (error) {
+                document.getElementById('card-errors').textContent = error.message;
+                submitButton.disabled = false;
+            } else {
+                // Payment succeeded
+                window.location.href = '?page=order_success&payment_intent=' + paymentIntent.id;
+            }
+        });
+    </script>
+    <?php
+    return ob_get_clean();
+}
+
+function order_success_page() {
+    if (!is_logged_in() || !isset($_GET['payment_intent'])) {
+        header("Location: ?page=home");
+        exit;
+    }
+    
+    $paymentIntentId = $_GET['payment_intent'];
+    
+    // Process order
+    $conn = db_connect();
+    $cartItems = get_cart_items($_SESSION['user_id']);
+    $cartTotal = get_cart_total($_SESSION['user_id']);
+    
+    // Create order
+    $orderId = create_order($_SESSION['user_id'], $paymentIntentId, $cartTotal);
+    
+    // Add order items
+    $items = [];
+    foreach ($cartItems as $item) {
+        $items[] = [
+            'id' => $item['id'],
+            'quantity' => $item['quantity'],
+            'price' => $item['price']
+        ];
+    }
+    add_order_items($orderId, $items);
+    
+    // Clear cart
+    clear_cart($_SESSION['user_id']);
+    
+    ob_start();
+    ?>
+    <div class="container" style="padding-top: 40px; text-align: center;">
+        <div class="order-success">
+            <i class="fas fa-check-circle fa-5x text-success"></i>
+            <h1>Thank You for Your Order!</h1>
+            <p>Your payment was processed successfully.</p>
+            <p>Order ID: #<?= htmlspecialchars($paymentIntentId) ?></p>
+            <div class="success-actions">
+                <a href="?page=products" class="btn btn-outline">Continue Shopping</a>
+                <a href="?page=home" class="btn btn-primary">Back to Home</a>
+            </div>
         </div>
     </div>
     <?php
@@ -904,6 +1350,9 @@ function get_page_content($page) {
         case 'register': return register_page();
         case 'about': return about_page();
         case 'contact': return contact_page();
+        case 'cart': return cart_page();
+        case 'checkout': return checkout_page();
+        case 'order_success': return order_success_page();
         default: return home_page();
     }
 }
@@ -1039,6 +1488,11 @@ function get_page_content($page) {
             font-size: 0.9rem;
         }
         
+        .btn-danger {
+            background-color: #e53e3e;
+            color: white;
+        }
+        
         .btn:hover {
             opacity: 0.9;
             transform: translateY(-2px);
@@ -1159,6 +1613,10 @@ function get_page_content($page) {
             display: flex;
             justify-content: space-between;
             gap: 10px;
+        }
+        
+        .add-to-cart-form {
+            display: inline;
         }
         
         .recommendation-section {
@@ -1416,9 +1874,172 @@ function get_page_content($page) {
             margin-bottom: 20px;
             color: var(--primary);
         }
-        
+        a{
+            text-decoration: none;
+        }
         .about-content p {
             margin-bottom: 15px;
+        }
+        
+        /* Cart Styles */
+        .empty-cart {
+            text-align: center;
+            padding: 40px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: var(--card-shadow);
+        }
+        
+        .empty-cart i {
+            color: #ddd;
+            margin-bottom: 20px;
+        }
+        
+        .cart-items table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: var(--card-shadow);
+        }
+        
+        .cart-items th, .cart-items td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .cart-items th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+        
+        .cart-product-info {
+            display: flex;
+            align-items: center;
+        }
+        
+        .cart-product-image {
+            width: 60px;
+            height: 60px;
+            background: #e0e7ff;
+            border-radius: 4px;
+            margin-right: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #4f46e5;
+            font-weight: bold;
+        }
+        
+        .quantity-input {
+            width: 60px;
+            padding: 5px;
+            text-align: center;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .cart-summary {
+            margin-top: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .cart-actions {
+            display: flex;
+            gap: 15px;
+        }
+        
+        /* Checkout Styles */
+        .checkout-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+        
+        .checkout-summary, .checkout-form {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: var(--card-shadow);
+        }
+        
+        .checkout-summary h3, .checkout-form h3 {
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .checkout-summary ul {
+            list-style: none;
+            margin-bottom: 20px;
+        }
+        
+        .checkout-summary li {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #f8f9fa;
+        }
+        
+        .checkout-total {
+            display: flex;
+            justify-content: space-between;
+            font-size: 1.2rem;
+            font-weight: bold;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+        
+        .stripe-card-element {
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            background: white;
+        }
+        
+        .stripe-errors {
+            color: #e53e3e;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+        }
+        
+        .order-success {
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: var(--card-shadow);
+            text-align: center;
+        }
+        
+        .order-success i {
+            color: #38a169;
+            margin-bottom: 20px;
+        }
+        
+        .success-actions {
+            margin-top: 30px;
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+        
+        /* Contact Styles */
+        .contact-container {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 30px;
+        }
+        
+        .contact-info, .contact-form {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: var(--card-shadow);
         }
     </style>
 </head>
@@ -1435,6 +2056,7 @@ function get_page_content($page) {
                     <li><a href="?page=products"><i class="fas fa-shopping-bag"></i> Products</a></li>
                     <li><a href="?page=about"><i class="fas fa-info-circle"></i> About</a></li>
                     <li><a href="?page=contact"><i class="fas fa-envelope"></i> Contact</a></li>
+                    <li><a href="?page=cart"><i class="fas fa-shopping-cart"></i> Cart</a></li>
                 </ul>
                 <div class="auth-buttons">
                     <?php if (is_logged_in()): ?>
@@ -1467,6 +2089,7 @@ function get_page_content($page) {
                         <li><a href="?page=products"><i class="fas fa-chevron-right"></i> Products</a></li>
                         <li><a href="?page=about"><i class="fas fa-chevron-right"></i> About Us</a></li>
                         <li><a href="?page=contact"><i class="fas fa-chevron-right"></i> Contact</a></li>
+                        <li><a href="?page=cart"><i class="fas fa-chevron-right"></i> Cart</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">

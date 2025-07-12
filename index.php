@@ -35,6 +35,7 @@ function initialize_database() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )");
     
+    
     // Products table
     $conn->query("CREATE TABLE IF NOT EXISTS products (
         id INT AUTO_INCREMENT PRIMARY KEY,

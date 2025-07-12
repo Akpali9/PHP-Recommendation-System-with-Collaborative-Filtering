@@ -1,5 +1,5 @@
 <?php
-// Start output buffering at the VERY TOP
+// Start output buffering
 ob_start();
 
 // Database Configuration
@@ -8,7 +8,7 @@ define('DB_USER', 'root');
 define('DB_PASS', '');
 define('DB_NAME', 'ecommerce_recommendations');
 
-// Stripe Configuration (use your test keys)
+// Stripe Configuration (replace with your test keys)
 define('STRIPE_KEY', 'sk_test_51P...'); // Your test secret key
 define('STRIPE_PUBLIC', 'pk_test_51P...'); // Your test publishable key
 
@@ -554,13 +554,13 @@ function send_message($name, $email, $subject, $message) {
     return $stmt->execute();
 }
 
-// Start session AFTER output buffering
+// Start session
 session_start();
 
 // Initialize database
 initialize_database();
 
-// Handle logout FIRST
+// Handle logout
 if (isset($_GET['logout'])) {
     logout_user();
     header("Location: index.php");
@@ -1208,18 +1208,32 @@ function checkout_page() {
         exit;
     }
     
-    // Initialize Stripe
-    require_once('vendor/autoload.php');
-    \Stripe\Stripe::setApiKey(STRIPE_KEY);
+    // Create Payment Intent using cURL
+    $url = 'https://api.stripe.com/v1/payment_intents';
+    $amount = $cartTotal * 100; // Convert to cents
     
-    // Create Payment Intent
-    $paymentIntent = \Stripe\PaymentIntent::create([
-        'amount' => $cartTotal * 100,
+    $data = [
+        'amount' => $amount,
         'currency' => 'usd',
-        'metadata' => [
-            'user_id' => $_SESSION['user_id']
-        ]
-    ]);
+        'metadata[user_id]' => $_SESSION['user_id']
+    ];
+    
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_POST, 1);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($data));
+    curl_setopt($ch, CURLOPT_USERPWD, STRIPE_KEY . ':');
+    
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    
+    if ($httpCode !== 200) {
+        die("Error creating payment intent. Please try again later.");
+    }
+    
+    $paymentIntent = json_decode($response);
     
     ob_start();
     ?>
@@ -1498,6 +1512,15 @@ function get_page_content($page) {
             transform: translateY(-2px);
         }
         
+        .mobile-menu-btn {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--dark);
+        }
+        
         .hero {
             background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
             color: white;
@@ -1714,14 +1737,20 @@ function get_page_content($page) {
         
         .product-detail {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr;
             gap: 40px;
             margin: 40px 0;
         }
         
+        @media (min-width: 768px) {
+            .product-detail {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+        
         .product-detail-image {
             background-color: #f5f5f5;
-            height: 400px;
+            height: 300px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1874,9 +1903,11 @@ function get_page_content($page) {
             margin-bottom: 20px;
             color: var(--primary);
         }
-        a{
+        
+        a {
             text-decoration: none;
         }
+        
         .about-content p {
             margin-bottom: 15px;
         }
@@ -1946,18 +1977,27 @@ function get_page_content($page) {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
         }
         
         .cart-actions {
             display: flex;
             gap: 15px;
+            flex-wrap: wrap;
         }
         
         /* Checkout Styles */
         .checkout-container {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr;
             gap: 30px;
+        }
+        
+        @media (min-width: 992px) {
+            .checkout-container {
+                grid-template-columns: 1fr 1fr;
+            }
         }
         
         .checkout-summary, .checkout-form {
@@ -2019,6 +2059,7 @@ function get_page_content($page) {
         .order-success i {
             color: #38a169;
             margin-bottom: 20px;
+            font-size: 3rem;
         }
         
         .success-actions {
@@ -2026,13 +2067,20 @@ function get_page_content($page) {
             display: flex;
             justify-content: center;
             gap: 15px;
+            flex-wrap: wrap;
         }
         
         /* Contact Styles */
         .contact-container {
             display: grid;
-            grid-template-columns: 1fr 2fr;
+            grid-template-columns: 1fr;
             gap: 30px;
+        }
+        
+        @media (min-width: 768px) {
+            .contact-container {
+                grid-template-columns: 1fr 2fr;
+            }
         }
         
         .contact-info, .contact-form {
@@ -2040,6 +2088,75 @@ function get_page_content($page) {
             padding: 25px;
             border-radius: 8px;
             box-shadow: var(--card-shadow);
+        }
+        
+        /* Responsive Navbar */
+        @media (max-width: 992px) {
+            .mobile-menu-btn {
+                display: block;
+            }
+            
+            .nav-links-container {
+                position: fixed;
+                top: 70px;
+                left: 0;
+                width: 100%;
+                background: white;
+                box-shadow: 0 10px 10px rgba(0, 0, 0, 0.1);
+                height: 0;
+                overflow: hidden;
+                transition: height 0.3s ease;
+                z-index: 99;
+            }
+            
+            .nav-links-container.active {
+                height: auto;
+                padding: 20px 0;
+            }
+            
+            .nav-links {
+                flex-direction: column;
+                padding: 0 20px;
+            }
+            
+            .nav-links li {
+                margin: 10px 0;
+            }
+            
+            .auth-buttons {
+                flex-direction: column;
+                padding: 0 20px;
+                gap: 10px;
+                margin-top: 20px;
+            }
+        }
+        
+        /* Responsive Tables */
+        @media (max-width: 768px) {
+            .cart-items table {
+                display: block;
+                overflow-x: auto;
+            }
+            
+            .cart-summary {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .cart-actions {
+                justify-content: center;
+            }
+        }
+        
+        /* Responsive Product Grid */
+        @media (max-width: 576px) {
+            .products-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .recommendation-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -2049,23 +2166,30 @@ function get_page_content($page) {
             <nav class="navbar">
                 <a href="?page=home" class="logo">
                     <i class="fas fa-robot"></i>
-                    ShopSmart
+                    <span>ShopSmart</span>
                 </a>
-                <ul class="nav-links">
-                    <li><a href="?page=home"><i class="fas fa-home"></i> Home</a></li>
-                    <li><a href="?page=products"><i class="fas fa-shopping-bag"></i> Products</a></li>
-                    <li><a href="?page=about"><i class="fas fa-info-circle"></i> About</a></li>
-                    <li><a href="?page=contact"><i class="fas fa-envelope"></i> Contact</a></li>
-                    <li><a href="?page=cart"><i class="fas fa-shopping-cart"></i> Cart</a></li>
-                </ul>
-                <div class="auth-buttons">
-                    <?php if (is_logged_in()): ?>
-                        <span>Welcome, <?= htmlspecialchars($_SESSION['username']) ?></span>
-                        <a href="?logout" class="btn btn-outline"><i class="fas fa-sign-out-alt"></i> Logout</a>
-                    <?php else: ?>
-                        <a href="?page=login" class="btn btn-outline"><i class="fas fa-sign-in-alt"></i> Login</a>
-                        <a href="?page=register" class="btn btn-primary"><i class="fas fa-user-plus"></i> Register</a>
-                    <?php endif; ?>
+                
+                <button class="mobile-menu-btn" id="mobile-menu-toggle">
+                    <i class="fas fa-bars"></i>
+                </button>
+                
+                <div class="nav-links-container" id="nav-links-container">
+                    <ul class="nav-links">
+                        <li><a href="?page=home"><i class="fas fa-home"></i> Home</a></li>
+                        <li><a href="?page=products"><i class="fas fa-shopping-bag"></i> Products</a></li>
+                        <li><a href="?page=about"><i class="fas fa-info-circle"></i> About</a></li>
+                        <li><a href="?page=contact"><i class="fas fa-envelope"></i> Contact</a></li>
+                        <li><a href="?page=cart"><i class="fas fa-shopping-cart"></i> Cart</a></li>
+                    </ul>
+                    <div class="auth-buttons">
+                        <?php if (is_logged_in()): ?>
+                            <span>Welcome, <?= htmlspecialchars($_SESSION['username']) ?></span>
+                            <a href="?logout" class="btn btn-outline"><i class="fas fa-sign-out-alt"></i> Logout</a>
+                        <?php else: ?>
+                            <a href="?page=login" class="btn btn-outline"><i class="fas fa-sign-in-alt"></i> Login</a>
+                            <a href="?page=register" class="btn btn-primary"><i class="fas fa-user-plus"></i> Register</a>
+                        <?php endif; ?>
+                    </div>
                 </div>
             </nav>
         </div>
@@ -2118,6 +2242,14 @@ function get_page_content($page) {
     </footer>
     
     <script>
+        // Mobile menu toggle
+        const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
+        const navLinksContainer = document.getElementById('nav-links-container');
+        
+        mobileMenuToggle.addEventListener('click', () => {
+            navLinksContainer.classList.toggle('active');
+        });
+        
         // Star rating functionality
         document.addEventListener('DOMContentLoaded', function() {
             const stars = document.querySelectorAll('.rating-star');

@@ -1412,6 +1412,11 @@ function get_page_content($page) {
             margin: 0 auto;
             padding: 0 15px;
         }
+        .nav-links {
+        align-items:center
+           
+            
+        }
         
         header {
             background-color: white;
@@ -1445,6 +1450,7 @@ function get_page_content($page) {
         .nav-links {
             display: flex;
             list-style: none;
+                     
         }
         
         .nav-links li {
@@ -1472,6 +1478,7 @@ function get_page_content($page) {
         .auth-buttons {
             display: flex;
             gap: 10px;
+            margin-left: 20px;
         }
         
         .btn {
@@ -2099,6 +2106,8 @@ function get_page_content($page) {
             .nav-links-container {
                 position: fixed;
                 top: 70px;
+               
+                justify-content: space-between;
                 left: 0;
                 width: 100%;
                 background: white;
@@ -2117,6 +2126,11 @@ function get_page_content($page) {
             .nav-links {
                 flex-direction: column;
                 padding: 0 20px;
+               align-items:start;
+           
+        
+              
+                
             }
             
             .nav-links li {
@@ -2125,7 +2139,7 @@ function get_page_content($page) {
             
             .auth-buttons {
                 flex-direction: column;
-                padding: 0 20px;
+                padding: 0 -20px;
                 gap: 10px;
                 margin-top: 20px;
             }
@@ -2165,7 +2179,6 @@ function get_page_content($page) {
         <div class="container">
             <nav class="navbar">
                 <a href="?page=home" class="logo">
-                    <i class="fas fa-robot"></i>
                     <span>ShopSmart</span>
                 </a>
                 
@@ -2180,8 +2193,7 @@ function get_page_content($page) {
                         <li><a href="?page=about"><i class="fas fa-info-circle"></i> About</a></li>
                         <li><a href="?page=contact"><i class="fas fa-envelope"></i> Contact</a></li>
                         <li><a href="?page=cart"><i class="fas fa-shopping-cart"></i> Cart</a></li>
-                    </ul>
-                    <div class="auth-buttons">
+                     <div class="auth-buttons">
                         <?php if (is_logged_in()): ?>
                             <span>Welcome, <?= htmlspecialchars($_SESSION['username']) ?></span>
                             <a href="?logout" class="btn btn-outline"><i class="fas fa-sign-out-alt"></i> Logout</a>
@@ -2190,7 +2202,10 @@ function get_page_content($page) {
                             <a href="?page=register" class="btn btn-primary"><i class="fas fa-user-plus"></i> Register</a>
                         <?php endif; ?>
                     </div>
+                    </ul>
+                   
                 </div>
+                
             </nav>
         </div>
     </header>

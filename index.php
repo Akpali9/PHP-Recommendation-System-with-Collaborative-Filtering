@@ -1480,6 +1480,11 @@ function get_page_content($page) {
             gap: 10px;
             margin-left: 20px;
         }
+          .auth-buttons span{
+                align-items:center;
+                top:10px;
+                position: relative;
+             }
         
         .btn {
             padding: 8px 15px;
@@ -2143,6 +2148,7 @@ function get_page_content($page) {
                 gap: 10px;
                 margin-top: 20px;
             }
+           
         }
         
         /* Responsive Tables */

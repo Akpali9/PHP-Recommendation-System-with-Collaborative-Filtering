@@ -57,6 +57,7 @@ function initialize_database() {
         FOREIGN KEY (user_id) REFERENCES users(id),
         FOREIGN KEY (product_id) REFERENCES products(id)
     )");
+
     
     // User views table (for tracking views)
     $conn->query("CREATE TABLE IF NOT EXISTS user_views (

@@ -13,6 +13,7 @@ define('DB_NAME', 'ecommerce_recommendations');
 define('STRIPE_KEY', 'sk_test_51P...'); // Your test secret key
 define('STRIPE_PUBLIC', 'pk_test_51P...'); // Your test publishable key
 
+
 // Connect to Database
 function db_connect() {
     $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);

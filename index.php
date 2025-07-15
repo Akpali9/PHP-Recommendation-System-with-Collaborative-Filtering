@@ -23,6 +23,7 @@ function db_connect() {
 }
 
 // Create database tables if they don't exist
+
 function initialize_database() {
     $conn = db_connect();
     

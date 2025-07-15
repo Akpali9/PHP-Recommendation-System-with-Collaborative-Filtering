@@ -205,8 +205,7 @@ class RecommendationSystem {
         
         return $den != 0 ? $num / $den : 0;
     }
-
-    /**
+/**
      * Get recommendations for a user
      */
     public function getRecommendations($userId, $limit = 5) {

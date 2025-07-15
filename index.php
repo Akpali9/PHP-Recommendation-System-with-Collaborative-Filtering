@@ -159,6 +159,7 @@ function initialize_database() {
     $conn->close();
 }
 
+
 // Recommendation System Class
 class RecommendationSystem {
     private $conn;

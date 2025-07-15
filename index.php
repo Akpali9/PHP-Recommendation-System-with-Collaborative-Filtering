@@ -1,6 +1,7 @@
 <?php
 // Start output buffering
 ob_start();
+
 // Database Configuration
 define('DB_HOST', 'localhost');
 define('DB_USER', 'root');
@@ -42,7 +43,7 @@ function initialize_database() {
         image_url VARCHAR(255),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )");
-    
+
     // User ratings table
     $conn->query("CREATE TABLE IF NOT EXISTS user_ratings (
         user_id INT NOT NULL,

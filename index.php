@@ -170,6 +170,7 @@ class RecommendationSystem {
     /**
      * Calculate Pearson correlation coefficient between two users
      */
+    
     private function calculateSimilarity($user1Id, $user2Id) {
         $stmt = $this->conn->prepare("
             SELECT 

@@ -77,7 +77,6 @@ function initialize_database() {
         FOREIGN KEY (product_id) REFERENCES products(id)
     )");
     
-    
     // Orders table
     $conn->query("CREATE TABLE IF NOT EXISTS orders (
         id INT AUTO_INCREMENT PRIMARY KEY,

@@ -166,6 +166,7 @@ class RecommendationSystem {
     public function __construct() {
         $this->conn = db_connect();
     }
+    
     /**
      * Calculate Pearson correlation coefficient between two users
      */

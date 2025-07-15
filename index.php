@@ -129,7 +129,7 @@ function initialize_database() {
             ["Resistance Bands", "Set of 5 resistance bands for home workouts", 34.99, "Fitness", "bands.jpg"],
             ["Scented Candle", "Lavender scented candle with 40h burn time", 16.99, "Home", "candle.jpg"]
         ];
-        
+    
         $stmt = $conn->prepare("INSERT INTO products (name, description, price, category, image_url) VALUES (?, ?, ?, ?, ?)");
         foreach ($sample_products as $product) {
             $stmt->bind_param("ssdss", $product[0], $product[1], $product[2], $product[3], $product[4]);

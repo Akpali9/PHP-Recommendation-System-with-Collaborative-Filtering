@@ -8,7 +8,6 @@ define('DB_USER', 'root');
 define('DB_PASS', '');
 define('DB_NAME', 'ecommerce_recommendations');
 
-
 // Stripe Configuration (replace with your test keys)
 define('STRIPE_KEY', 'sk_test_51P...'); // Your test secret key
 define('STRIPE_PUBLIC', 'pk_test_51P...'); // Your test publishable key
